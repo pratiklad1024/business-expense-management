@@ -1,0 +1,195 @@
+# =============================================================================
+# BEMS — Business Expense Management System
+# application.yml — default Spring profile
+# =============================================================================
+
+spring:
+  application:
+    name: bems
+
+  profiles:
+    active: default
+
+  # ---------------------------------------------------------------------------
+  # DataSource / HikariCP connection pool
+  # ---------------------------------------------------------------------------
+  datasource:
+    url: ${BEMS_DB_URL:jdbc:postgresql://localhost:5432/bems}
+    username: ${BEMS_DB_USER:bems}
+    password: ${BEMS_DB_PASSWORD:bems}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      minimum-idle: 5
+      maximum-pool-size: 50
+      idle-timeout: 600000          # 10 minutes
+      max-lifetime: 1800000         # 30 minutes
+      connection-timeout: 30000     # 30 seconds
+      pool-name: bems-hikari-pool
+
+  # ---------------------------------------------------------------------------
+  # JPA / Hibernate
+  # ---------------------------------------------------------------------------
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    open-in-view: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: false
+        jdbc:
+          time_zone: UTC
+
+  # ---------------------------------------------------------------------------
+  # Flyway schema migration
+  # ---------------------------------------------------------------------------
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: false
+    validate-on-migrate: true
+    out-of-order: false
+
+  # ---------------------------------------------------------------------------
+  # Spring Mail (SMTP)
+  # ---------------------------------------------------------------------------
+  mail:
+    host: ${BEMS_SMTP_HOST:localhost}
+    port: ${BEMS_SMTP_PORT:1025}
+    username: ${BEMS_SMTP_USER:}
+    password: ${BEMS_SMTP_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: ${BEMS_SMTP_AUTH:false}
+          starttls:
+            enable: ${BEMS_SMTP_TLS:false}
+
+# =============================================================================
+# Server
+# =============================================================================
+server:
+  port: 8080
+  servlet:
+    context-path: /
+
+# =============================================================================
+# BEMS custom configuration
+# =============================================================================
+bems:
+  # ---------------------------------------------------------------------------
+  # JWT security
+  # ---------------------------------------------------------------------------
+  jwt:
+    secret: ${JWT_SECRET:changeme-in-production-min-256-bit-key}
+    access-token-expiry-seconds: 900       # 15 minutes
+    refresh-token-expiry-seconds: 604800   # 7 days
+
+  # ---------------------------------------------------------------------------
+  # Async thread pool — notification worker (Req 13 / design §Notification)
+  # ---------------------------------------------------------------------------
+  async:
+    notification-pool:
+      core-size: 5
+      max-size: 20
+      queue-capacity: 100
+      thread-name-prefix: notif-
+
+  # ---------------------------------------------------------------------------
+  # File storage mode: local (dev/test) or s3 (production)
+  # ---------------------------------------------------------------------------
+  storage:
+    mode: ${BEMS_STORAGE_MODE:local}   # local | s3
+    local:
+      base-path: ${BEMS_STORAGE_LOCAL_PATH:${java.io.tmpdir}/bems/attachments}
+    s3:
+      bucket: ${BEMS_S3_BUCKET:bems-attachments}
+      region: ${AWS_REGION:us-east-1}
+      presigned-url-expiry-seconds: 3600
+
+  # ---------------------------------------------------------------------------
+  # Escalation defaults (configurable per business via business_configs table)
+  # ---------------------------------------------------------------------------
+  escalation:
+    default-threshold-days: 7
+
+# =============================================================================
+# Springdoc / OpenAPI
+# =============================================================================
+springdoc:
+  api-docs:
+    path: /api/v1/api-docs
+  swagger-ui:
+    path: /api/v1/docs
+  show-actuator: false
+
+# =============================================================================
+# Actuator
+# =============================================================================
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
+
+# =============================================================================
+# Logging
+# =============================================================================
+logging:
+  level:
+    root: INFO
+    com.bems: DEBUG
+    org.springframework.security: INFO
+    org.hibernate.SQL: INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%X{correlationId}] %logger{36} - %msg%n"
+
+---
+# =============================================================================
+# Spring profile: dev
+# =============================================================================
+spring:
+  config:
+    activate:
+      on-profile: dev
+  jpa:
+    show-sql: true
+  flyway:
+    baseline-on-migrate: true
+
+logging:
+  level:
+    com.bems: DEBUG
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
+
+---
+# =============================================================================
+# Spring profile: prod
+# =============================================================================
+spring:
+  config:
+    activate:
+      on-profile: prod
+  jpa:
+    show-sql: false
+  datasource:
+    hikari:
+      minimum-idle: 10
+      maximum-pool-size: 50
+
+server:
+  ssl:
+    enabled: true
+    key-store: ${SSL_KEY_STORE}
+    key-store-password: ${SSL_KEY_STORE_PASSWORD}
+    key-store-type: PKCS12
+
+logging:
+  level:
+    root: WARN
+    com.bems: INFO

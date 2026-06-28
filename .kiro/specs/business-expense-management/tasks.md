@@ -8,8 +8,8 @@ Implement a multi-tenant, production-quality expense management platform using a
 
 ## Tasks
 
-- [ ] 1. Project Scaffolding and Maven Multi-Module Setup
-  - [ ] 1.1 Create the Maven multi-module parent POM and three child modules (`bems-domain`, `bems-application`, `bems-integration-test`)
+- [x] 1. Project Scaffolding and Maven Multi-Module Setup
+  - [x] 1.1 Create the Maven multi-module parent POM and three child modules (`bems-domain`, `bems-application`, `bems-integration-test`)
     - Define `bems-parent/pom.xml` with `<modules>`, dependency management for Java 21, Spring Boot 3.3 BOM, jqwik 1.8, Testcontainers, JJWT 0.12, Apache POI, OpenPDF, Flyway, HikariCP, springdoc-openapi 2, Mockito, JUnit 5
     - Create `bems-domain/pom.xml` — pure Java, no Spring, no JPA dependencies
     - Create `bems-application/pom.xml` — depends on `bems-domain`; includes Spring Boot Starter Web, Security, Data JPA, Mail, Validation, Actuator, springdoc, Flyway, PostgreSQL driver
