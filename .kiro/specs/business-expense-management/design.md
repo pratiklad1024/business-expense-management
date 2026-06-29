@@ -18,7 +18,7 @@ The Business Expense Management System (BEMS) is a multi-tenant, production-qual
 |---|---|---|
 | Language | Java 21 (LTS) | Virtual threads (Project Loom) simplify async I/O; strong ecosystem; long support window. |
 | Framework | Spring Boot 3.3 | Autoconfiguration, Spring Security 6, Spring Data JPA, Spring Batch for reports. |
-| Database | PostgreSQL 16 | ACID transactions, JSONB for audit state snapshots, Row-Level Security hooks, mature JDBC driver. |
+| Database | MySQL 8.0 | ACID transactions, JSON column type for audit state snapshots, mature Connector/J driver, wide hosting support. |
 | Connection Pool | HikariCP | Default Spring Boot pool; min 5 / max 50 per instance, tuned via `application.yml`. |
 | ORM | Spring Data JPA + Hibernate 6 | Entity lifecycle hooks for audit; native queries where performance demands it. |
 | Migration | Flyway | Version-controlled schema changes; applied at startup. |
@@ -53,7 +53,7 @@ graph TB
     end
 
     subgraph "Persistence"
-        PG[(PostgreSQL 16<br/>Primary + Read Replica)]
+        PG[(MySQL 8.0<br/>Primary + Read Replica)]
         S3[(S3-Compatible<br/>Object Store)]
     end
 
@@ -226,78 +226,78 @@ erDiagram
 
 | Column | Type | Notes |
 |---|---|---|
-| `id` | UUID PK | Generated |
+| `id` | CHAR(36) PK | UUID stored as string |
 | `name` | VARCHAR(255) UNIQUE NOT NULL | |
 | `country` | VARCHAR(100) NOT NULL | |
 | `currency_code` | CHAR(3) NOT NULL | ISO 4217 |
 | `contact_email` | VARCHAR(255) NOT NULL | |
 | `status` | VARCHAR(20) NOT NULL | `ACTIVE` / `INACTIVE` |
-| `created_at` | TIMESTAMPTZ NOT NULL | |
-| `updated_at` | TIMESTAMPTZ | |
-| `deleted_at` | TIMESTAMPTZ | Soft delete |
-| `deleted_by` | UUID FK→users | |
+| `created_at` | DATETIME(6) NOT NULL | |
+| `updated_at` | DATETIME(6) | |
+| `deleted_at` | DATETIME(6) | Soft delete |
+| `deleted_by` | CHAR(36) FK→users | |
 
 #### `users`
 
 | Column | Type | Notes |
 |---|---|---|
-| `id` | UUID PK | |
-| `business_id` | UUID FK→businesses NOT NULL | Tenant scope |
-| `department_id` | UUID FK→departments | |
+| `id` | CHAR(36) PK | |
+| `business_id` | CHAR(36) FK→businesses NOT NULL | Tenant scope |
+| `department_id` | CHAR(36) FK→departments | |
 | `full_name` | VARCHAR(255) NOT NULL | PII column |
 | `email` | VARCHAR(255) NOT NULL | PII column; unique per business |
 | `password_hash` | VARCHAR(255) NOT NULL | BCrypt |
 | `role` | VARCHAR(50) NOT NULL | Enum |
 | `status` | VARCHAR(20) NOT NULL | `ACTIVE` / `INACTIVE` / `LOCKED` |
-| `data_subject_id` | UUID | GDPR linkage |
+| `data_subject_id` | CHAR(36) | GDPR linkage |
 | `failed_login_count` | SMALLINT DEFAULT 0 | |
-| `locked_until` | TIMESTAMPTZ | Account lockout |
+| `locked_until` | DATETIME(6) | Account lockout |
 | `activation_token` | VARCHAR(255) | One-time; 48h TTL |
-| `activation_expires_at` | TIMESTAMPTZ | |
-| `created_at` | TIMESTAMPTZ NOT NULL | |
-| `deleted_at` | TIMESTAMPTZ | |
-| `deleted_by` | UUID FK→users | |
+| `activation_expires_at` | DATETIME(6) | |
+| `created_at` | DATETIME(6) NOT NULL | |
+| `deleted_at` | DATETIME(6) | |
+| `deleted_by` | CHAR(36) FK→users | |
 
-**Indexes:** `(business_id, email)` UNIQUE WHERE `deleted_at IS NULL`; `(business_id, role)`.
+**Indexes:** Unique index on `(business_id, email)` with a partial-emulation WHERE `deleted_at IS NULL` enforced at application layer; index on `(business_id, role)`.
 
 #### `departments`
 
 | Column | Type | Notes |
 |---|---|---|
-| `id` | UUID PK | |
-| `business_id` | UUID FK NOT NULL | |
+| `id` | CHAR(36) PK | |
+| `business_id` | CHAR(36) FK NOT NULL | |
 | `name` | VARCHAR(255) NOT NULL | Unique per business |
 | `description` | TEXT | |
 | `status` | VARCHAR(20) | `ACTIVE` / `INACTIVE` |
-| `created_at` | TIMESTAMPTZ | |
-| `deleted_at` | TIMESTAMPTZ | |
-| `deleted_by` | UUID FK→users | |
+| `created_at` | DATETIME(6) | |
+| `deleted_at` | DATETIME(6) | |
+| `deleted_by` | CHAR(36) FK→users | |
 
 #### `expense_categories`
 
 | Column | Type | Notes |
 |---|---|---|
-| `id` | UUID PK | |
-| `business_id` | UUID FK NOT NULL | |
+| `id` | CHAR(36) PK | |
+| `business_id` | CHAR(36) FK NOT NULL | |
 | `name` | VARCHAR(255) NOT NULL | |
 | `description` | TEXT | |
-| `per_transaction_limit` | NUMERIC(15,2) | NULL = no limit |
+| `per_transaction_limit` | DECIMAL(15,2) | NULL = no limit |
 | `status` | VARCHAR(20) | `ACTIVE` / `INACTIVE` |
-| `created_at` | TIMESTAMPTZ | |
-| `deleted_at` | TIMESTAMPTZ | |
-| `deleted_by` | UUID FK→users | |
+| `created_at` | DATETIME(6) | |
+| `deleted_at` | DATETIME(6) | |
+| `deleted_by` | CHAR(36) FK→users | |
 
 #### `spending_policies`
 
 | Column | Type | Notes |
 |---|---|---|
-| `id` | UUID PK | |
-| `business_id` | UUID FK NOT NULL | |
+| `id` | CHAR(36) PK | |
+| `business_id` | CHAR(36) FK NOT NULL | |
 | `policy_type` | VARCHAR(30) NOT NULL | `EMPLOYEE_MONTHLY` / `DEPARTMENT_MONTHLY` |
-| `target_id` | UUID NOT NULL | Employee ID or Department ID |
-| `monthly_limit` | NUMERIC(15,2) NOT NULL | |
-| `created_at` | TIMESTAMPTZ | |
-| `updated_at` | TIMESTAMPTZ | |
+| `target_id` | CHAR(36) NOT NULL | Employee ID or Department ID |
+| `monthly_limit` | DECIMAL(15,2) NOT NULL | |
+| `created_at` | DATETIME(6) | |
+| `updated_at` | DATETIME(6) | |
 
 **Constraint:** UNIQUE `(business_id, policy_type, target_id)`.
 
@@ -305,33 +305,33 @@ erDiagram
 
 | Column | Type | Notes |
 |---|---|---|
-| `id` | UUID PK | |
-| `business_id` | UUID FK NOT NULL | Denormalised for query performance |
-| `submitter_id` | UUID FK→users NOT NULL | |
-| `department_id` | UUID FK→departments NOT NULL | Snapshot at submission time |
-| `category_id` | UUID FK→expense_categories NOT NULL | |
+| `id` | CHAR(36) PK | |
+| `business_id` | CHAR(36) FK NOT NULL | Denormalised for query performance |
+| `submitter_id` | CHAR(36) FK→users NOT NULL | |
+| `department_id` | CHAR(36) FK→departments NOT NULL | Snapshot at submission time |
+| `category_id` | CHAR(36) FK→expense_categories NOT NULL | |
 | `title` | VARCHAR(255) NOT NULL | |
-| `amount` | NUMERIC(15,2) NOT NULL | Positive |
+| `amount` | DECIMAL(15,2) NOT NULL | Positive |
 | `expense_date` | DATE NOT NULL | |
 | `description` | TEXT | |
 | `status` | VARCHAR(30) NOT NULL | State machine enum |
 | `approval_tier` | VARCHAR(20) NOT NULL | `MANAGER_ONLY` / `MANAGER_ACCOUNTANT` / `MANAGER_ACCOUNTANT_OWNER` |
-| `current_approver_id` | UUID FK→users | Active approver |
-| `is_escalated` | BOOLEAN DEFAULT FALSE | |
+| `current_approver_id` | CHAR(36) FK→users | Active approver |
+| `is_escalated` | TINYINT(1) DEFAULT 0 | |
 | `resubmission_count` | SMALLINT DEFAULT 0 | |
-| `last_resubmitted_at` | TIMESTAMPTZ | |
-| `submitted_at` | TIMESTAMPTZ | |
+| `last_resubmitted_at` | DATETIME(6) | |
+| `submitted_at` | DATETIME(6) | |
 | `payment_reference` | VARCHAR(255) | Reimbursement |
 | `payment_method` | VARCHAR(100) | |
 | `payment_date` | DATE | |
-| `reimbursed_at` | TIMESTAMPTZ | |
-| `reimbursed_by` | UUID FK→users | |
-| `created_at` | TIMESTAMPTZ NOT NULL | |
-| `updated_at` | TIMESTAMPTZ | |
-| `deleted_at` | TIMESTAMPTZ | |
-| `deleted_by` | UUID FK→users | |
+| `reimbursed_at` | DATETIME(6) | |
+| `reimbursed_by` | CHAR(36) FK→users | |
+| `created_at` | DATETIME(6) NOT NULL | |
+| `updated_at` | DATETIME(6) | |
+| `deleted_at` | DATETIME(6) | |
+| `deleted_by` | CHAR(36) FK→users | |
 
-**Indexes:** `(business_id, status)`, `(business_id, submitter_id)`, `(business_id, department_id, status)`, `(current_approver_id)` PARTIAL WHERE `deleted_at IS NULL`.
+**Indexes:** `(business_id, status)`, `(business_id, submitter_id)`, `(business_id, department_id, status)`, `(current_approver_id)` (soft-delete exclusion enforced in query WHERE clause).
 
 #### `approval_steps`
 
@@ -339,13 +339,13 @@ Append-only table recording every approval decision.
 
 | Column | Type | Notes |
 |---|---|---|
-| `id` | UUID PK | |
-| `expense_id` | UUID FK NOT NULL | |
-| `approver_id` | UUID FK→users NOT NULL | |
+| `id` | CHAR(36) PK | |
+| `expense_id` | CHAR(36) FK NOT NULL | |
+| `approver_id` | CHAR(36) FK→users NOT NULL | |
 | `approver_role` | VARCHAR(50) NOT NULL | Snapshot |
 | `action` | VARCHAR(20) NOT NULL | `APPROVED` / `REJECTED` / `OVERRIDDEN` |
 | `comment` | TEXT | Mandatory for rejection/override |
-| `acted_at` | TIMESTAMPTZ NOT NULL | |
+| `acted_at` | DATETIME(6) NOT NULL | |
 | `step_order` | SMALLINT NOT NULL | Position in chain |
 
 **No UPDATE or DELETE ever issued on this table.**
@@ -354,30 +354,30 @@ Append-only table recording every approval decision.
 
 | Column | Type | Notes |
 |---|---|---|
-| `id` | UUID PK | |
-| `expense_id` | UUID FK NOT NULL | |
-| `business_id` | UUID FK NOT NULL | |
+| `id` | CHAR(36) PK | |
+| `expense_id` | CHAR(36) FK NOT NULL | |
+| `business_id` | CHAR(36) FK NOT NULL | |
 | `original_filename` | VARCHAR(255) | |
 | `mime_type` | VARCHAR(100) NOT NULL | Validated |
 | `file_size_bytes` | BIGINT NOT NULL | |
 | `storage_key` | VARCHAR(512) NOT NULL | Object store path |
-| `uploaded_by` | UUID FK→users | |
-| `uploaded_at` | TIMESTAMPTZ NOT NULL | |
-| `deleted_at` | TIMESTAMPTZ | |
-| `deleted_by` | UUID FK→users | |
+| `uploaded_by` | CHAR(36) FK→users | |
+| `uploaded_at` | DATETIME(6) NOT NULL | |
+| `deleted_at` | DATETIME(6) | |
+| `deleted_by` | CHAR(36) FK→users | |
 
 #### `delegate_approvers`
 
 | Column | Type | Notes |
 |---|---|---|
-| `id` | UUID PK | |
-| `business_id` | UUID FK NOT NULL | |
-| `manager_id` | UUID FK→users NOT NULL | |
-| `delegate_id` | UUID FK→users NOT NULL | Must be same business |
+| `id` | CHAR(36) PK | |
+| `business_id` | CHAR(36) FK NOT NULL | |
+| `manager_id` | CHAR(36) FK→users NOT NULL | |
+| `delegate_id` | CHAR(36) FK→users NOT NULL | Must be same business |
 | `start_date` | DATE NOT NULL | Delegation starts 00:00:00 UTC |
 | `end_date` | DATE NOT NULL | Delegation ends 23:59:59 UTC |
-| `is_active` | BOOLEAN DEFAULT TRUE | Set to false by scheduler |
-| `created_at` | TIMESTAMPTZ | |
+| `is_active` | TINYINT(1) DEFAULT 1 | Set to 0 by scheduler |
+| `created_at` | DATETIME(6) | |
 
 **Constraint:** `start_date <= end_date`.
 
@@ -385,48 +385,48 @@ Append-only table recording every approval decision.
 
 | Column | Type | Notes |
 |---|---|---|
-| `id` | UUID PK | |
-| `business_id` | UUID FK NOT NULL | |
-| `recipient_id` | UUID FK→users NOT NULL | |
+| `id` | CHAR(36) PK | |
+| `business_id` | CHAR(36) FK NOT NULL | |
+| `recipient_id` | CHAR(36) FK→users NOT NULL | |
 | `type` | VARCHAR(50) NOT NULL | `EXPENSE_SUBMITTED`, `APPROVED`, `REJECTED`, etc. |
 | `title` | VARCHAR(255) | |
 | `body` | TEXT | |
 | `reference_entity_type` | VARCHAR(50) | `EXPENSE` etc. |
-| `reference_entity_id` | UUID | |
-| `is_read` | BOOLEAN DEFAULT FALSE | |
-| `read_at` | TIMESTAMPTZ | |
-| `created_at` | TIMESTAMPTZ NOT NULL | |
+| `reference_entity_id` | CHAR(36) | |
+| `is_read` | TINYINT(1) DEFAULT 0 | |
+| `read_at` | DATETIME(6) | |
+| `created_at` | DATETIME(6) NOT NULL | |
 
-**Index:** `(recipient_id, is_read)` WHERE `deleted_at IS NULL`.
+**Index:** `(recipient_id, is_read)`.
 
 #### `audit_log`
 
 | Column | Type | Notes |
 |---|---|---|
-| `id` | UUID PK | |
-| `business_id` | UUID | NULL for platform-level actions |
+| `id` | CHAR(36) PK | |
+| `business_id` | CHAR(36) | NULL for platform-level actions |
 | `entity_type` | VARCHAR(50) NOT NULL | |
-| `entity_id` | UUID NOT NULL | |
+| `entity_id` | CHAR(36) NOT NULL | |
 | `action_type` | VARCHAR(50) NOT NULL | `CREATE` / `UPDATE` / `STATUS_CHANGE` / `LOGIN` / `LOGOUT` / `SOFT_DELETE` |
-| `actor_id` | UUID FK→users NOT NULL | |
+| `actor_id` | CHAR(36) FK→users NOT NULL | |
 | `actor_role` | VARCHAR(50) NOT NULL | Snapshot |
-| `previous_state` | JSONB | |
-| `new_state` | JSONB | |
-| `timestamp` | TIMESTAMPTZ NOT NULL | |
-| `pii_accessed` | BOOLEAN DEFAULT FALSE | GDPR flag |
+| `previous_state` | JSON | |
+| `new_state` | JSON | |
+| `timestamp` | DATETIME(6) NOT NULL | |
+| `pii_accessed` | TINYINT(1) DEFAULT 0 | GDPR flag |
 
-**No UPDATE or DELETE ever issued on this table. Partition by `timestamp` for 7-year retention management.**
+**No UPDATE or DELETE ever issued on this table. Index on `(timestamp)` for range queries; 7-year retention managed via scheduled purge job.**
 
 #### `refresh_tokens`
 
 | Column | Type | Notes |
 |---|---|---|
-| `id` | UUID PK | |
-| `user_id` | UUID FK→users NOT NULL | |
+| `id` | CHAR(36) PK | |
+| `user_id` | CHAR(36) FK→users NOT NULL | |
 | `token_hash` | VARCHAR(512) NOT NULL | SHA-256 of raw token |
-| `expires_at` | TIMESTAMPTZ NOT NULL | |
-| `revoked_at` | TIMESTAMPTZ | NULL = valid |
-| `created_at` | TIMESTAMPTZ NOT NULL | |
+| `expires_at` | DATETIME(6) NOT NULL | |
+| `revoked_at` | DATETIME(6) | NULL = valid |
+| `created_at` | DATETIME(6) NOT NULL | |
 
 #### `business_configs`
 
@@ -434,10 +434,10 @@ Stores per-business configurable parameters.
 
 | Column | Type | Notes |
 |---|---|---|
-| `id` | UUID PK | |
-| `business_id` | UUID FK UNIQUE NOT NULL | |
+| `id` | CHAR(36) PK | |
+| `business_id` | CHAR(36) FK UNIQUE NOT NULL | |
 | `escalation_threshold_days` | SMALLINT DEFAULT 7 | |
-| `updated_at` | TIMESTAMPTZ | |
+| `updated_at` | DATETIME(6) | |
 
 ---
 
@@ -527,7 +527,7 @@ A scheduled job (`@Scheduled(cron = "0 0 0 * * *")`) sets `is_active = false` fo
 
 ### 6. Append-Only Audit Log
 
-`AuditLogAspect` is an `@AfterReturning` AOP aspect on all `@AuditableAction`-annotated service methods. It serialises the before/after entity state to JSONB using Jackson and inserts directly via a `JdbcTemplate` INSERT (bypassing JPA to guarantee no merge/update path exists).
+`AuditLogAspect` is an `@AfterReturning` AOP aspect on all `@AuditableAction`-annotated service methods. It serialises the before/after entity state to JSON string using Jackson and inserts directly via a `JdbcTemplate` INSERT (bypassing JPA to guarantee no merge/update path exists).
 
 ### 7. File Attachment Validation (MIME + Magic Bytes)
 
@@ -1051,7 +1051,7 @@ All property tests target pure domain functions (state machine, policy validator
 | Service unit | JUnit 5 + Mockito | Use-case services with mocked ports |
 | Web slice | `@WebMvcTest` + MockMvc | Controller serialization, validation, HTTP status codes |
 | Repository slice | `@DataJpaTest` + H2 | JPA queries, tenant filter, soft-delete |
-| Integration | Testcontainers (PostgreSQL) | End-to-end API flows, audit log completeness |
+| Integration | Testcontainers (MySQL 8.0) | End-to-end API flows, audit log completeness |
 | Security | MockMvc + custom security config | JWT parsing, RBAC enforcement, rate limiting |
 | Performance | JMeter / Gatling script | 200 concurrent users, p95 < 500ms; export < 10s |
 
@@ -1099,7 +1099,7 @@ void passwordAcceptedIffAllCriteriaMet(@ForAll String password) {
 
 ### Integration Test Coverage
 
-Integration tests use **Testcontainers** with a real PostgreSQL 16 instance. Key scenarios:
+Integration tests use **Testcontainers** with a real MySQL 8.0 instance. Key scenarios:
 
 1. Full expense lifecycle: Draft → Submit → Approve (all tiers) → Reimburse, verifying audit log entry at each step.
 2. Cross-tenant isolation: create expenses in two businesses; assert neither can see the other's data.

@@ -14,10 +14,10 @@ spring:
   # DataSource / HikariCP connection pool
   # ---------------------------------------------------------------------------
   datasource:
-    url: ${BEMS_DB_URL:jdbc:postgresql://localhost:5432/bems}
+    url: ${BEMS_DB_URL:jdbc:mysql://localhost:3306/bems?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&characterEncoding=UTF-8}
     username: ${BEMS_DB_USER:bems}
     password: ${BEMS_DB_PASSWORD:bems}
-    driver-class-name: org.postgresql.Driver
+    driver-class-name: com.mysql.cj.jdbc.Driver
     hikari:
       minimum-idle: 5
       maximum-pool-size: 50
@@ -36,7 +36,7 @@ spring:
     open-in-view: false
     properties:
       hibernate:
-        dialect: org.hibernate.dialect.PostgreSQLDialect
+        dialect: org.hibernate.dialect.MySQLDialect
         format_sql: false
         jdbc:
           time_zone: UTC

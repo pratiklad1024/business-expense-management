@@ -12,8 +12,8 @@ Implement a multi-tenant, production-quality expense management platform using a
   - [x] 1.1 Create the Maven multi-module parent POM and three child modules (`bems-domain`, `bems-application`, `bems-integration-test`)
     - Define `bems-parent/pom.xml` with `<modules>`, dependency management for Java 21, Spring Boot 3.3 BOM, jqwik 1.8, Testcontainers, JJWT 0.12, Apache POI, OpenPDF, Flyway, HikariCP, springdoc-openapi 2, Mockito, JUnit 5
     - Create `bems-domain/pom.xml` — pure Java, no Spring, no JPA dependencies
-    - Create `bems-application/pom.xml` — depends on `bems-domain`; includes Spring Boot Starter Web, Security, Data JPA, Mail, Validation, Actuator, springdoc, Flyway, PostgreSQL driver
-    - Create `bems-integration-test/pom.xml` — depends on `bems-application`; includes Testcontainers PostgreSQL, REST Assured
+    - Create `bems-application/pom.xml` — depends on `bems-domain`; includes Spring Boot Starter Web, Security, Data JPA, Mail, Validation, Actuator, springdoc, Flyway, MySQL Connector/J driver
+    - Create `bems-integration-test/pom.xml` — depends on `bems-application`; includes Testcontainers MySQL, REST Assured
     - Set up `src/main/java` and `src/test/java` directory trees for all modules following the `com.bems` package structure defined in the design
     - Create `bems-application/src/main/resources/application.yml` with HikariCP pool (min=5, max=50), Flyway enabled, JWT secret placeholder, async thread-pool config, storage mode config
     - _Requirements: 20.1, 21.3, 21.4_
@@ -41,7 +41,7 @@ Implement a multi-tenant, production-quality expense management platform using a
     - Create `Attachment` entity: id, expenseId, businessId, originalFilename, mimeType, fileSizeBytes, storageKey, uploadedBy, uploadedAt, deletedAt, deletedBy
     - Create `DelegateApprover` entity: id, businessId, managerId, delegateId, startDate, endDate, isActive
     - Create `Notification` entity: id, businessId, recipientId, type, title, body, referenceEntityType, referenceEntityId, isRead, readAt, createdAt
-    - Create `AuditLog` entity: all columns from data model; JSONB fields represented as `String` in domain
+    - Create `AuditLog` entity: all columns from data model; JSON state fields (`previous_state`, `new_state`) represented as `String` in domain
     - Create `RefreshToken` entity: id, userId, tokenHash, expiresAt, revokedAt, createdAt
     - Create `BusinessConfig` entity: id, businessId, escalationThresholdDays
     - _Requirements: 1.1, 2.1, 3.1, 4.1, 5.1, 6.1, 8.5, 11.1, 13.1, 18.2_
@@ -160,37 +160,42 @@ Implement a multi-tenant, production-quality expense management platform using a
 
 - [ ] 9. Flyway Database Migrations
   - [ ] 9.1 Create Flyway migration `V1__create_businesses.sql`
-    - `businesses` table with all columns, PK, UNIQUE constraint on `name`, index on `status`
+    - `businesses` table: `id CHAR(36) PK`, VARCHAR/CHAR columns, `status VARCHAR(20)`, `created_at DATETIME(6)`, `deleted_at DATETIME(6)`, `deleted_by CHAR(36)`; UNIQUE constraint on `name`; index on `status`; ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     - _Requirements: 1.1, 19.1_
   - [ ] 9.2 Create Flyway migration `V2__create_users.sql`
-    - `users` table; UNIQUE index `(business_id, email) WHERE deleted_at IS NULL`; index `(business_id, role)`
+    - `users` table: all columns using `CHAR(36)` for UUID PKs/FKs, `SMALLINT` for `failed_login_count`, `DATETIME(6)` for all timestamp columns, `TINYINT(1)` not needed (no boolean here); composite index on `(business_id, email)` — unique constraint where `deleted_at IS NULL` enforced at application layer via unique index plus application-level check; index on `(business_id, role)`
     - _Requirements: 2.1, 19.1_
   - [ ] 9.3 Create Flyway migration `V3__create_departments_and_categories.sql`
-    - `departments` table; `expense_categories` table; UNIQUE `(business_id, name)` on each
+    - `departments` table: `CHAR(36)` PKs/FKs, `DATETIME(6)` timestamps; UNIQUE `(business_id, name)` on each
+    - `expense_categories` table: `per_transaction_limit DECIMAL(15,2)`; same conventions
     - _Requirements: 3.1, 4.1_
   - [ ] 9.4 Create Flyway migration `V4__create_spending_policies.sql`
-    - `spending_policies` table; UNIQUE constraint `(business_id, policy_type, target_id)`
+    - `spending_policies` table: `monthly_limit DECIMAL(15,2) NOT NULL`; UNIQUE constraint `(business_id, policy_type, target_id)`
     - _Requirements: 5.1_
   - [ ] 9.5 Create Flyway migration `V5__create_expenses_and_approval_steps.sql`
-    - `expenses` table with all columns and indexes: `(business_id, status)`, `(business_id, submitter_id)`, `(business_id, department_id, status)`, `(current_approver_id) PARTIAL WHERE deleted_at IS NULL`
-    - `approval_steps` table (no UPDATE/DELETE)
+    - `expenses` table: `amount DECIMAL(15,2)`, `is_escalated TINYINT(1) DEFAULT 0`, `resubmission_count SMALLINT DEFAULT 0`, all timestamps as `DATETIME(6)`; indexes: `(business_id, status)`, `(business_id, submitter_id)`, `(business_id, department_id, status)`, `(current_approver_id)` — soft-delete filtering handled in query WHERE clause
+    - `approval_steps` table: `CHAR(36)` PKs/FKs, `acted_at DATETIME(6)`, `step_order SMALLINT`; no UPDATE/DELETE
     - _Requirements: 6.1, 8.1, 12.1_
   - [ ] 9.6 Create Flyway migration `V6__create_attachments_and_delegates.sql`
-    - `attachments` table; `delegate_approvers` table with constraint `start_date <= end_date`
+    - `attachments` table: `CHAR(36)` PKs/FKs, `file_size_bytes BIGINT`, `uploaded_at DATETIME(6)`
+    - `delegate_approvers` table: `is_active TINYINT(1) DEFAULT 1`; CHECK constraint `start_date <= end_date`
     - _Requirements: 6.2, 8.5_
   - [ ] 9.7 Create Flyway migration `V7__create_notifications_and_audit.sql`
-    - `notifications` table; index `(recipient_id, is_read) WHERE deleted_at IS NULL`
-    - `audit_log` table (no UPDATE/DELETE); partition by `timestamp` for 7-year retention
+    - `notifications` table: `is_read TINYINT(1) DEFAULT 0`, `read_at DATETIME(6)`, `created_at DATETIME(6)`; composite index `(recipient_id, is_read)`
+    - `audit_log` table: `previous_state JSON`, `new_state JSON`, `timestamp DATETIME(6)`, `pii_accessed TINYINT(1) DEFAULT 0`; no UPDATE/DELETE; index on `(timestamp)` for 7-year retention range queries
     - _Requirements: 13.1, 18.1, 18.3, 18.6_
   - [ ] 9.8 Create Flyway migration `V8__create_auth_and_config_tables.sql`
-    - `refresh_tokens` table; `business_configs` table; `notification_failures` table (id, notification_id, error_message, retry_count, next_retry_at, created_at)
+    - `refresh_tokens` table: `expires_at DATETIME(6)`, `revoked_at DATETIME(6)`
+    - `business_configs` table: `escalation_threshold_days SMALLINT DEFAULT 7`, `updated_at DATETIME(6)`
+    - `notification_failures` table: `id CHAR(36) PK`, `notification_id CHAR(36)`, `error_message TEXT`, `retry_count SMALLINT`, `next_retry_at DATETIME(6)`, `created_at DATETIME(6)`
     - _Requirements: 16.1, 8.1, 11.2_
 
 - [ ] 10. JPA Persistence Adapters
   - [ ] 10.1 Create JPA entity classes in `bems-application/adapter/persistence/entity`
     - Annotate each entity with `@Entity`, `@Table`, `@FilterDef` and `@Filter` for `tenantFilter` (condition: `business_id = :businessId`) on all business-scoped entities
     - Add `@EntityListeners(AuditingEntityListener.class)` for `createdAt`/`updatedAt` auto-population
-    - Map JSONB columns (`previous_state`, `new_state`) with custom `JsonbType` Hibernate type
+    - Map `previous_state` and `new_state` JSON columns as `@Column(columnDefinition = "JSON")` with a `JsonToStringConverter` (`@Convert`) to serialize/deserialize as plain `String`; no custom Hibernate type needed
+    - Map `is_escalated`, `is_read`, `is_active`, `pii_accessed` (`TINYINT(1)`) as `boolean` in Java; Hibernate maps `boolean` to `TINYINT(1)` automatically with MySQL dialect
     - _Requirements: 1.5, 19.1_
   - [ ] 10.2 Create Spring Data JPA repository interfaces in `bems-application/adapter/persistence`
     - Implement all methods declared in domain port interfaces using Spring Data query methods or `@Query`
@@ -422,7 +427,7 @@ Implement a multi-tenant, production-quality expense management platform using a
 
 - [ ] 21. Escalation Scheduler
   - [ ] 21.1 Implement `EscalationSchedulerService` in `usecase`
-    - `@Scheduled(cron = "0 0 * * * *")` (hourly): query all expenses in `SUBMITTED` status where no active delegate exists and `DATEDIFF(now, submitted_at) > escalation_threshold_days` (per `business_configs.escalation_threshold_days`, default 7)
+    - `@Scheduled(cron = "0 0 * * * *")` (hourly): query all expenses in `SUBMITTED` status where no active delegate exists and `DATEDIFF(NOW(), submitted_at) > escalation_threshold_days` (per `business_configs.escalation_threshold_days`, default 7)
     - Set `is_escalated = true` on matching expenses; do NOT change status
     - Publish `ExpenseEscalatedEvent` for each newly escalated expense (triggers notification to Admin + Business_Owner)
     - _Requirements: 8.1, 8.7_
@@ -609,7 +614,7 @@ Implement a multi-tenant, production-quality expense management platform using a
 
 - [ ] 33. Integration Tests (Testcontainers)
   - [ ] 33.1 Set up Testcontainers base test class in `bems-integration-test`
-    - Start PostgreSQL 16 container; run Flyway migrations on test DB; configure `application-test.yml` with container JDBC URL
+    - Start MySQL 8.0 container (`org.testcontainers:mysql`); run Flyway migrations on test DB; configure `application-test.yml` with container JDBC URL (`jdbc:mysql://...`) and `spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver`
     - Create `IntegrationTestBase` with `@SpringBootTest(webEnvironment = RANDOM_PORT)` + REST Assured setup
     - _Requirements: All_
   - [ ] 33.2 Implement full expense lifecycle integration test
